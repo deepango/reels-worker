@@ -26,5 +26,8 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 # Copy the worker code itself
 COPY worker/main.py /app/
 
+# Clear the default ffmpeg entrypoint so we can run Python naturally
+ENTRYPOINT []
+
 # Set the start command to run the python queue consumer
 CMD ["python3", "-u", "main.py"]
