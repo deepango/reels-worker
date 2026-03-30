@@ -65,12 +65,16 @@ def process_job(job_data):
         print(f"Downloaded assets for {len(scene_files)} scenes.")
 
         # Step 2: Generate FFMPEG Concat File
-        # (This is a simplified FFmpeg generation: image + audio = video, then concat all)
         concat_file = os.path.join(job_dir, "concat.txt")
         with open(concat_file, "w") as f:
             for i, (img, aud) in enumerate(scene_files):
+                # Ensure files exist and have content
+                if not os.path.exists(img) or os.path.getsize(img) == 0:
+                    raise FileNotFoundError(f"Missing or empty image file: {img}")
+                if not os.path.exists(aud) or os.path.getsize(aud) == 0:
+                    raise FileNotFoundError(f"Missing or empty audio file: {aud}")
+
                 scene_video = os.path.join(job_dir, f"out_{i}.mp4")
-                # Create mini video for this scene
                 cmd = [
                     "ffmpeg", "-y",
                     "-loop", "1", "-framerate", "2", "-i", img,
@@ -80,7 +84,14 @@ def process_job(job_data):
                     scene_video
                 ]
                 print(f"Running FFmpeg for scene {i}...")
-                subprocess.run(cmd, check=True, capture_output=True)
+                
+                # Capture standard error to surface exact FFmpeg failure
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"FFmpeg failed with exit code {result.returncode}")
+                    print(f"FFmpeg STDERR:\n{result.stderr}")
+                    result.check_returncode() # Raise error to break out of try-block
+                
                 f.write(f"file '{scene_video}'\n")
 
         # Step 3: Concat all scenes into final video
