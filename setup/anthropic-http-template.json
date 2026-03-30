@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "url": "https://api.anthropic.com/v1/messages",
+  "headers": {
+    "x-api-key": "{{$env.ANTHROPIC_API_KEY}}",
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json"
+  },
+  "body": {
+    "model": "claude-3-5-haiku-20241022",
+    "max_tokens": 700,
+    "temperature": 0.7,
+    "system": "You are a real-estate reel scriptwriter. Output strict JSON only.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Create a 30-second script with 5 scenes for topic: {{$json.topic}}. Return JSON: {title, hook, scenes:[{image_prompt, voice_line}], cta}."
+      }
+    ]
+  }
+}

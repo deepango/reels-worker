@@ -1,0 +1,281 @@
+# AI Reels Platform: Revised Execution Plan (Zero Free Tiers)
+
+[cite_start]This plan outlines the strategy to build a reliable AI-driven Reels platform from scratch with a focus on paid, stable tools to ensure professional delivery from day one[cite: 1, 2, 11].
+
+---
+
+## 📊 Budget & Status Overview
+* [cite_start]**Budget**: ₹50,000+ runway + $500 Render.com credits[cite: 3].
+* [cite_start]**Time Commitment**: 3–5 hours/day[cite: 3].
+* [cite_start]**Status**: Starting from scratch[cite: 3].
+* [cite_start]**Philosophy**: "₹50,000 is your runway — not your spend budget. Protect it. Every rupee should either build the product or buy a customer." [cite: 5]
+
+---
+
+## 🏗️ 90-Day Financial Reality
+[cite_start]You have approximately **6.5 months of runway** at zero revenue[cite: 8].
+
+### Revenue Milestones
+* **Month 1 Goal**: 9 customers (₹8,991 MRR) - **Break-even on fixed costs**
+* **Month 2 Goal**: 25 customers (₹24,975 MRR) - **True profitability** (covers time + costs)
+* **Month 3 Goal**: 50 customers (₹49,950 MRR) - **Sustainable business** (₹40k+ net profit)
+
+At 25 customers, you'll be earning more than a ₹25k/month job while building equity.
+
+### Monthly Fixed Overhead (First 3 Months) - OPTIMIZED
+| Category | Monthly Cost | 3-Month Total | Notes |
+| :--- | :--- | :--- | :--- |
+| **Infrastructure** | ₹0 (Render credits) | ₹0 | $500 credits = ~16 months (Worker + DB + Redis) |
+| **API Costs** | ~₹6–8/video | Variable | [cite_start]Anthropic + Replicate + ElevenLabs [cite: 7] |
+| **n8n Cloud (Starter)** | ₹1,700 | ₹5,100 | [cite_start]No debugging overhead, automatic updates [cite: 7] |
+| **Domain + Framer** | ₹2,200 | ₹6,600 | [cite_start]One-time domain + Framer Basic [cite: 7] |
+| **ElevenLabs Creator** | ₹1,700 | ₹5,100 | [cite_start]30k chars/month, no free cap risk [cite: 7] |
+| **Monitoring** | ₹800 | ₹2,400 | BetterStack uptime monitoring + Sentry free tier |
+| **Buffer** | ₹2,000 | ₹6,000 | [cite_start]API spikes, retries, mistakes [cite: 7] |
+| **Total Fixed** | **~₹8,400/mo** | **~₹25,200** | Break-even at 9 customers (₹8,991 MRR) |
+
+---
+
+## 🛠️ Revised Tech Stack
+[cite_start]The stack has been rewritten for reliability by avoiding free tiers that cause issues once customers join[cite: 10, 11].
+
+| Component | Tool | Cost/Month | Why This? |
+| :--- | :--- | :--- | :--- |
+| **Pipeline** | n8n Cloud (Starter) | ~₹1,700 | [cite_start]No debugging overhead, automatic updates [cite: 12] |
+| **Hosting** | Render.com | ~₹0 (credits) | [cite_start]Managed deploys, auto-scaling [cite: 12] |
+| **Database** | PostgreSQL (Render) | ~₹0 (credits) | Customer data, job tracking, usage logs |
+| **Job Queue** | Redis (Render) | ~₹0 (credits) | Better than raw webhooks, retry logic |
+| **Storage** | Backblaze B2 | ~₹500 | [cite_start]$6/mo baseline, reliable storage [cite: 12] |
+| **Scripting** | Anthropic Claude 3.5 Haiku | Pay-per-use | [cite_start]~₹0.50/video, high quality [cite: 12] |
+| **Images** | Replicate (FLUX) | Pay-per-use | [cite_start]~₹3–5 for 5 images [cite: 12] |
+| **Voice** | ElevenLabs Creator | ~₹1,700 | [cite_start]30k chars, commercial rights [cite: 12] |
+| **Video Engine** | FFmpeg on Render | ₹0 | [cite_start]CPU cost absorbed in credits [cite: 12] |
+| **Landing Page** | Framer Basic | ~₹1,200 | [cite_start]Custom domain, professional look [cite: 12] |
+| **Payments** | Stripe / Razorpay | 2.5% + fees | [cite_start]Best-in-class, instant payouts [cite: 12, 92] |
+
+### Database Schema (PostgreSQL)
+```sql
+-- Customers table
+CREATE TABLE customers (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    subscription_status VARCHAR(50) DEFAULT 'active',
+    plan_type VARCHAR(50) DEFAULT 'pro',
+    videos_remaining INT DEFAULT 20,
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_video_at TIMESTAMP
+);
+
+-- Video jobs table
+CREATE TABLE video_jobs (
+    id SERIAL PRIMARY KEY,
+    customer_id INT REFERENCES customers(id),
+    topic TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending',
+    s3_url TEXT,
+    error_logs TEXT,
+    cost_breakdown JSONB,
+    generation_time_seconds INT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP
+);
+
+-- Usage tracking table
+CREATE TABLE usage_tracking (
+    id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    total_videos INT DEFAULT 0,
+    total_cost_inr DECIMAL(10,2) DEFAULT 0,
+    api_breakdown JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+## 💰 Unit Economics & Margins
+[cite_start]At a price point of **₹999/month** per customer for 20 videos[cite: 15, 122]:
+
+* [cite_start]**Script (Claude 3.5 Haiku)**: ~₹0.50 [cite: 14]
+* [cite_start]**Images (5 Scenes)**: ~₹4.00 [cite: 14]
+* [cite_start]**Voice (ElevenLabs)**: ~₹1.50 [cite: 14]
+* [cite_start]**Storage (B2)**: ~₹0.10 [cite: 14]
+* [cite_start]**Total Cost Per Video**: ~₹6–7 [cite: 14]
+* [cite_start]**Total Cost Per Customer**: ~₹122 [cite: 14]
+* [cite_start]**Net Margin**: **~78%** (~₹786 per customer)[cite: 15].
+
+---
+
+## 🚀 5-Week Build Sequence
+
+### Week 1: Infrastructure & Pipeline Skeleton
+> [cite_start]**Goal**: Trigger the webhook and get a rough MP4 back[cite: 19, 46].
+* [cite_start]**Days 1–2**: Create accounts (Render, B2, n8n, Anthropic, Replicate, ElevenLabs)[cite: 21]. [cite_start]Buy a .in or .co domain[cite: 22].
+  - **Render Infrastructure Setup**:
+    - Deploy PostgreSQL database (Starter plan)
+    - Deploy Redis instance for job queue
+    - Deploy Background Worker with FFmpeg
+    - Apply $500 credits and set billing alert at $400
+  - **Database Setup**: Run the PostgreSQL schema (see Database Schema section)
+  - **Monitoring**: Set up Sentry (free tier) and BetterStack (₹800/mo)
+* [cite_start]**Days 3–4**: Build the n8n sequence (Webhook → Anthropic → Loop Scenes → Replicate → ElevenLabs → Render Worker/FFmpeg → Backblaze B2) [cite: 28-36].
+  - Integrate Redis job queue between n8n and Render Worker
+  - Add PostgreSQL logging for each video job (status, timestamps, costs)
+* [cite_start]**Days 5–6**: Test with 5 real estate topics[cite: 38].
+  - **Performance Testing**: Track generation time for each step:
+    - **Target total time**: <5 minutes per video
+    - Claude 3.5 Haiku script: <30 seconds
+    - Replicate FLUX (5 images): <2 minutes
+    - ElevenLabs voice: <20 seconds
+    - FFmpeg assembly: <2 minutes
+  - If total time >5 minutes, identify bottleneck and upgrade Render Worker to Standard ($25/mo)
+  - [cite_start]Fix common JSON parsing and timeout errors[cite: 40, 41].
+* [cite_start]**Day 7**: Setup Sentry error monitoring and a 6-hour cron health check in n8n [cite: 43-45].
+  - Create simple admin dashboard (password-protected HTML page):
+    - Jobs in queue (from Redis)
+    - Failed jobs (from PostgreSQL)
+    - Today's API costs
+    - Total videos generated counter
+
+### Week 2: Quality & Style Optimization
+> [cite_start]**Goal**: Produce videos a real estate agent would actually post[cite: 48].
+* [cite_start]**Prompts**: Create a style library for "cinematic interior photography" to avoid generic AI looks[cite: 52, 53].
+* [cite_start]**Voice**: Use high-quality voices like 'Rachel' or 'Aria' with SSML pauses for human-like delivery[cite: 56, 57].
+* [cite_start]**FFmpeg**: Add 0.4s crossfade dissolves and Ken Burns (slow zoom) effects[cite: 60, 61].
+* [cite_start]**QA**: Manually review all videos for the first 30 days to ensure "gold standard" demo assets[cite: 65, 70].
+
+### Week 3: Landing Page & Sales Outreach
+> [cite_start]**Goal**: 10 paying customers (₹9,990 MRR)[cite: 72, 94].
+* **Landing Page**: One page on Framer. Offer 20 videos for ₹999/month. [cite_start]Use a "free sample" Google Form as the CTA [cite: 73-79].
+* [cite_start]**Outreach**: Send 50 DMs/day to real estate agents using a specific script offering a free sample Reel [cite: 84-86].
+* **Customer Acquisition Cost (CAC) Tracking**:
+  - Create a Google Sheet with columns: Date, DMs Sent, Samples Delivered, Paid Conversions, CAC
+  - Formula: CAC = (Time spent × ₹500/hour + Ad spend) / Paid Conversions
+  - **Target CAC**: <₹3,000 (break-even in first month with 78% margin)
+  - Track daily metrics:
+    - DM → Sample conversion rate (target: >10%)
+    - Sample → Paid conversion rate (target: >20%)
+  - If CAC >₹3,000 by day 5, pivot strategy:
+    - Test different DM scripts
+    - Add referral incentive (₹500 credit per referral)
+    - Target brokerages instead of individual agents
+* [cite_start]**Closing**: Use Razorpay links for immediate payment collection[cite: 92].
+
+### Week 4: Automated Intake & Payments
+> [cite_start]**Goal**: Remove yourself from the intake process[cite: 96].
+* [cite_start]**Intake**: Replace Google Forms with a password-gated Typeform that triggers the n8n workflow [cite: 97-101].
+* [cite_start]**Payments**: Set up Stripe subscriptions to automate access [cite: 103-105].
+* [cite_start]**Auto-Retry**: Add logic to n8n to retry failed generations with simplified prompts if errors occur [cite: 107-109].
+
+### Week 5: Feedback & Iteration
+> [cite_start]**Goal**: Fix the top 3 complaints from your first 10 customers[cite: 113].
+* [cite_start]Send WhatsApp voice notes to each customer to ask for feedback[cite: 114].
+* [cite_start]Only build features requested by at least 3 people (e.g., captions, brand colors, or more styles)[cite: 117, 118].
+
+---
+
+## 📈 Scalability Checkpoints
+
+### At 10 Customers (₹9,990 MRR) - Week 3-4
+**Status**: Break-even achieved
+* **Action**: None. Monitor and optimize existing pipeline
+* **Red Flags**:
+  - If generation time >5 minutes: Upgrade Render Worker to Standard
+  - If error rate >5%: Add automated retry logic in n8n
+  - If churn >20% in first month: Emergency feedback calls
+
+### At 25 Customers (₹24,975 MRR) - Month 2
+**Status**: Profitability (covers time + costs)
+* **Infrastructure**:
+  - Review Render Worker performance, upgrade to Standard ($25/mo) if needed
+  - Add automated retries for failed generations in n8n
+  - Implement daily PostgreSQL backups to B2
+* **Operations**:
+  - Hire VA for customer support (₹10k/mo)
+  - Create customer onboarding doc/video
+  - Set up automated "Day 7 check-in" WhatsApp messages
+* **Red Flags**:
+  - If Render credits depleting faster than expected: Review per-video costs
+  - If support taking >2 hours/day: Hire VA immediately
+
+### At 50 Customers (₹49,950 MRR) - Month 3-4
+**Status**: Sustainable business
+* **Infrastructure**:
+  - Consider upgrading to Cloudflare R2 instead of B2 for faster delivery
+  - Add CDN for video delivery
+  - Review n8n execution limits, may need Pro plan (₹4,200/mo)
+* **Product**:
+  - Build simple admin dashboard for customer self-service
+  - Add top 3 requested features from feedback loop
+  - Implement automatic monthly usage reports
+* **Marketing**:
+  - Allocate ₹15k/mo for paid ads (Meta/Google)
+  - Test referral program (₹500 credit per successful referral)
+* **Red Flags**:
+  - If n8n hitting execution limits: Upgrade to Pro immediately
+  - If queue delays >30 minutes: Add second Render Worker
+
+### At 100 Customers (₹99,900 MRR) - Month 5-6
+**Status**: Scaling phase
+* **Infrastructure**:
+  - Migrate to dedicated infrastructure (consider AWS/GCP)
+  - Implement proper load balancing
+  - Add Redis Cluster for distributed job queue
+* **Team**:
+  - Hire full-time customer success manager
+  - Hire part-time developer for feature development
+* **Product**:
+  - Build customer dashboard with login
+  - Add analytics and scheduling features
+  - Consider white-label options for agencies
+
+---
+
+## ⚠️ Risk Management
+| Risk | Impact | Mitigation |
+| :--- | :--- | :--- |
+| **API Cost Spike** | High | [cite_start]Set hard monthly spend caps in Replicate ($100) and Anthropic ($50) dashboards[cite: 124]. Monitor daily via admin dashboard. |
+| **n8n Breakdown** | High | [cite_start]Sentry monitoring + 6-hourly cron health checks[cite: 124]. Keep backup webhook URL. |
+| **Customer Churn** | Medium | [cite_start]Execute the Week 5 feedback loop and Day 7/Day 25 check-ins[cite: 124]. |
+| **Image Quality** | Medium | [cite_start]Maintain a style library and perform human review in v1[cite: 124]. |
+| **Render Credits Depletion** | Medium | Set alert at $400 usage. Budget for $31/mo after credits run out. |
+| **Performance Degradation** | High | Track generation time per video. Upgrade Worker if >5min average. |
+
+### 🚨 Performance Red Flags (Week 1 Testing)
+Watch for these during Days 5-6 testing:
+* **FFmpeg takes >3 minutes per video**: Render Worker is undersized, upgrade to Standard
+* **Replicate costs >₹300/day during testing**: Runaway generation loops, check n8n retry logic
+* **Total generation time >5 minutes**: Identify bottleneck and optimize
+* **Error rate >5%**: Review error logs, add better error handling
+
+---
+
+## 🛑 What NOT to Build (v1)
+Do not build these until you have **50+ customers**:
+* [cite_start]User dashboards/logins (use WhatsApp/Typeform)[cite: 127].
+* [cite_start]Social media auto-posting (requires API approval)[cite: 127].
+* [cite_start]Mobile apps (PWA or WhatsApp bot is sufficient)[cite: 127].
+* [cite_start]Analytics/Scheduling[cite: 127].
+
+---
+
+## ✅ Immediate Next Actions
+1. **Bitwarden**: Create a 'Reels Platform APIs' vault with all credentials.
+2. **Domain**: Buy a .in or .co.in domain.
+3. **n8n Cloud**: Sign up for the Starter plan (₹1,700/mo).
+4. **Render.com Infrastructure**:
+   - Create account and apply $500 credits
+   - Deploy PostgreSQL database (Starter: $7/mo)
+   - Deploy Redis instance ($10/mo via add-on)
+   - Deploy Background Worker with FFmpeg (Starter: $7/mo)
+   - **Set billing alert at $400 credit usage**
+5. **API Spending Caps**:
+   - Replicate: Set hard cap at $100/mo
+  - Anthropic: Set hard cap at $50/mo
+   - Monitor daily via admin dashboard
+6. **Monitoring Setup**:
+   - Sentry account (free tier)
+   - BetterStack account (₹800/mo)
+   - Create initial admin dashboard template
+
+Would you like me to help you draft the specific **Anthropic prompt templates** for the real estate "Style Library" mentioned for Week 2?
