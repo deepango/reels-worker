@@ -196,9 +196,13 @@ def process_job(job_data):
         final_b2_url = None
         if B2_ENDPOINT and B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY and B2_BUCKET_NAME:
             print("Uploading final video to Backblaze B2...")
+            endpoint_url = B2_ENDPOINT
+            if not endpoint_url.startswith('http'):
+                endpoint_url = 'https://' + endpoint_url
+                
             b2 = boto3.client(
                 service_name='s3',
-                endpoint_url=B2_ENDPOINT,
+                endpoint_url=endpoint_url,
                 aws_access_key_id=B2_APPLICATION_KEY_ID,
                 aws_secret_access_key=B2_APPLICATION_KEY,
                 config=Config(signature_version='s3v4')
