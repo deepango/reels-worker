@@ -42,9 +42,14 @@ def download_file_with_auth(url, filepath):
     if "backblazeb2.com" in url and B2_ENDPOINT and B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY and B2_BUCKET_NAME:
         print("Using Boto3 to download from B2...")
         try:
+            # Boto3 endpoints must strictly start with https://
+            endpoint_url = B2_ENDPOINT
+            if not endpoint_url.startswith('http'):
+                endpoint_url = 'https://' + endpoint_url
+                
             b2 = boto3.client(
                 service_name='s3',
-                endpoint_url=B2_ENDPOINT,
+                endpoint_url=endpoint_url,
                 aws_access_key_id=B2_APPLICATION_KEY_ID,
                 aws_secret_access_key=B2_APPLICATION_KEY,
                 config=Config(signature_version='s3v4')
