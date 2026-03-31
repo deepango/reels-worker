@@ -237,7 +237,18 @@ def main():
             result = r.blpop(QUEUE_NAME, timeout=0)
             if result:
                 _, data_bytes = result
-                job_data = json.loads(data_bytes.decode('utf-8'))
+                job_payload = json.loads(data_bytes.decode('utf-8'))
+                
+                # If wrapped in an array, take the first element
+                if isinstance(job_payload, list) and len(job_payload) > 0:
+                    job_payload = job_payload[0]
+                    
+                # The actual data is inside 'queue_payload' key based on n8n output
+                if "queue_payload" in job_payload:
+                    job_data = job_payload["queue_payload"]
+                else:
+                    job_data = job_payload
+                    
                 process_job(job_data)
         except Exception as e:
             print(f"Queue polling error: {e}")
