@@ -34,9 +34,32 @@ except Exception as e:
 # Ensure temp directory exists
 Path(TEMP_DIR).mkdir(parents=True, exist_ok=True)
 
-def download_file(url, filepath):
-    """Download a file from a URL to a local path."""
+def download_file_with_auth(url, filepath):
+    """Download a file from a URL to a local path, handling B2 Auth if needed."""
     print(f"Downloading {url} to {filepath}...")
+    
+    # If it's a Backblaze B2 url, and we have credentials, use boto3 to download
+    if "backblazeb2.com" in url and B2_ENDPOINT and B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY and B2_BUCKET_NAME:
+        print("Using Boto3 to download from B2...")
+        try:
+            b2 = boto3.client(
+                service_name='s3',
+                endpoint_url=B2_ENDPOINT,
+                aws_access_key_id=B2_APPLICATION_KEY_ID,
+                aws_secret_access_key=B2_APPLICATION_KEY,
+                config=Config(signature_version='s3v4')
+            )
+            # Extact object key from URL: https://s3.../bucket-name/object/key.mpga
+            # Example url: https://s3.us-east-005.backblazeb2.com/reels-output/0/1/audio.mpga
+            url_parts = url.split(B2_BUCKET_NAME + '/')
+            if len(url_parts) > 1:
+                object_key = url_parts[1]
+                b2.download_file(B2_BUCKET_NAME, object_key, filepath)
+                return filepath
+        except Exception as e:
+            print(f"Boto3 download failed, falling back to public request: {e}")
+
+    # Fallback to public HTTP request
     response = requests.get(url, stream=True)
     response.raise_for_status()
     with open(filepath, 'wb') as f:
@@ -75,7 +98,7 @@ def resolve_and_download_audio(scene, audio_path):
     if audio_url:
         if not audio_url.startswith('http'):
             audio_url = 'https://' + audio_url.lstrip('/')
-        return download_file(audio_url, audio_path)
+        return download_file_with_auth(audio_url, audio_path)
 
     if audio_file_id:
         if isinstance(audio_file_id, str) and audio_file_id.startswith("filesystem-v2:"):
@@ -113,7 +136,7 @@ def process_job(job_data):
             audio_path = os.path.join(job_dir, f"scene_{i}.mp3")
             
             if image_url:
-                download_file(image_url, image_path)
+                download_file_with_auth(image_url, image_path)
             else:
                 raise ValueError(f"Scene {i} is missing image_url")
 
