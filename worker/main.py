@@ -4,12 +4,23 @@ import time
 import requests
 import subprocess
 import redis
+import boto3
+import psycopg2
+from botocore.client import Config
 from pathlib import Path
 
 # Load environment variables
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 N8N_CALLBACK_URL = os.environ.get("N8N_CALLBACK_URL")
 TEMP_DIR = os.environ.get("TEMP_DIR", "/tmp/reels")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+
+B2_ENDPOINT = os.environ.get("B2_ENDPOINT")
+B2_APPLICATION_KEY_ID = os.environ.get("B2_APPLICATION_KEY_ID")
+B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
+B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME")
+
 QUEUE_NAME = "reels:jobs"
 
 # Set up Redis connection
@@ -33,6 +44,46 @@ def download_file(url, filepath):
             f.write(chunk)
     return filepath
 
+def download_elevenlabs_audio_by_id(audio_file_id, filepath):
+    """Download ElevenLabs audio from a filesystem-v2 reference by extracting the history item id."""
+    if not ELEVENLABS_API_KEY:
+        raise RuntimeError("ELEVENLABS_API_KEY is missing in worker environment")
+
+    # n8n reference format:
+    # filesystem-v2:workflows/<workflow_id>/executions/<id>/binary_data/<history_item_id>
+    history_item_id = audio_file_id.split("/")[-1]
+    if not history_item_id:
+        raise ValueError(f"Invalid audio_file_id: {audio_file_id}")
+
+    url = f"https://api.elevenlabs.io/v1/history/{history_item_id}/audio"
+    headers = {"xi-api-key": ELEVENLABS_API_KEY}
+    print(f"Downloading ElevenLabs audio by history id: {history_item_id}")
+    response = requests.get(url, headers=headers, stream=True, timeout=60)
+    response.raise_for_status()
+
+    with open(filepath, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    return filepath
+
+def resolve_and_download_audio(scene, audio_path):
+    """Resolve audio from either direct URL or ElevenLabs file reference."""
+    audio_url = scene.get("audio_url")
+    audio_file_id = scene.get("audio_file_id")
+
+    if audio_url:
+        if not audio_url.startswith('http'):
+            audio_url = 'https://' + audio_url.lstrip('/')
+        return download_file(audio_url, audio_path)
+
+    if audio_file_id:
+        if isinstance(audio_file_id, str) and audio_file_id.startswith("filesystem-v2:"):
+            return download_elevenlabs_audio_by_id(audio_file_id, audio_path)
+        raise ValueError(f"Unsupported audio_file_id format: {audio_file_id}")
+
+    raise ValueError("Scene is missing both 'audio_url' and 'audio_file_id'")
+
 def process_job(job_data):
     """Process a single video job: download assets, run ffmpeg, trigger callback."""
     job_id = job_data.get("job_id")
@@ -50,15 +101,16 @@ def process_job(job_data):
         for i, scene in enumerate(scenes):
             # These keys match your n8n output assignments
             image_url = scene.get("image_url")
-            audio_url = scene.get("audio_url") # Assuming n8n passes URL, or you saved binary to a temp host
             
             image_path = os.path.join(job_dir, f"scene_{i}.jpg")
             audio_path = os.path.join(job_dir, f"scene_{i}.mp3")
             
-            # Note: For production, you need to handle n8n binaries. 
-            # If n8n gives raw binary data, you'll save it directly instead of requests.get()
-            if image_url: download_file(image_url, image_path)
-            if audio_url: download_file(audio_url, audio_path)
+            if image_url:
+                download_file(image_url, image_path)
+            else:
+                raise ValueError(f"Scene {i} is missing image_url")
+
+            resolve_and_download_audio(scene, audio_path)
             
             scene_files.append((image_path, audio_path))
             
@@ -105,12 +157,43 @@ def process_job(job_data):
         
         print(f"Video generated successfully: {final_video}")
 
-        # Step 4: Upload to Backblaze B2 (Placeholder for actual B2 API call)
-        # TODO: Implement B2 upload using boto3 or b2sdk
-        final_b2_url = f"https://s3.us-west-000.backblazeb2.com/reels-output/final_{job_id}.mp4"
-        print(f"Simulated upload to B2: {final_b2_url}")
+        # Step 4: Upload to Backblaze B2
+        final_b2_url = None
+        if B2_ENDPOINT and B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY and B2_BUCKET_NAME:
+            print("Uploading final video to Backblaze B2...")
+            b2 = boto3.client(
+                service_name='s3',
+                endpoint_url=B2_ENDPOINT,
+                aws_access_key_id=B2_APPLICATION_KEY_ID,
+                aws_secret_access_key=B2_APPLICATION_KEY,
+                config=Config(signature_version='s3v4')
+            )
+            object_name = f"{job_id}/final.mp4"
+            b2.upload_file(final_video, B2_BUCKET_NAME, object_name)
+            
+            # Construct public URL
+            # Format: https://<endpoint_host>/<bucket_name>/<object_name>
+            endpoint_host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
+            final_b2_url = f"https://{endpoint_host}/{B2_BUCKET_NAME}/{object_name}"
+            print(f"Uploaded successfully. B2 URL: {final_b2_url}")
+        else:
+            print("B2 credentials missing, skipping upload.")
+            final_b2_url = f"file://{final_video}"
 
-        # Step 5: Send Callback to n8n
+        # Step 5: Update Database directly (or fallback to webhook)
+        if DATABASE_URL:
+            print("Updating job status in Postgres...")
+            conn = psycopg2.connect(DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE video_jobs SET status = %s, b2_url = %s, completed_at = NOW() WHERE id = %s",
+                ("completed", final_b2_url, job_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            print("Postgres updated successfully.")
+
         if N8N_CALLBACK_URL and N8N_CALLBACK_URL != "https://replace_me/webhook/render-callback":
             print(f"Sending success callback to n8n: {N8N_CALLBACK_URL}")
             requests.post(N8N_CALLBACK_URL, json={
@@ -124,6 +207,20 @@ def process_job(job_data):
     except Exception as e:
         print(f"Error processing job {job_id}: {e}")
         # Send failure callback
+        if DATABASE_URL:
+            try:
+                conn = psycopg2.connect(DATABASE_URL)
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE video_jobs SET status = %s, error_logs = %s, updated_at = NOW() WHERE id = %s",
+                    ("failed", str(e), job_id)
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+            except Exception as db_err:
+                print(f"Failed to update db on error: {db_err}")
+
         if N8N_CALLBACK_URL and N8N_CALLBACK_URL != "https://replace_me/webhook/render-callback":
             requests.post(N8N_CALLBACK_URL, json={
                 "job_id": job_id,
