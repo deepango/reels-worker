@@ -86,6 +86,13 @@ def resolve_and_download_audio(scene, audio_path):
 
 def process_job(job_data):
     """Process a single video job: download assets, run ffmpeg, trigger callback."""
+    # n8n might send an array or wrap it in queue_payload
+    if isinstance(job_data, list) and len(job_data) > 0:
+        job_data = job_data[0]
+        
+    if "queue_payload" in job_data:
+        job_data = job_data["queue_payload"]
+
     job_id = job_data.get("job_id")
     scenes = job_data.get("scenes", [])
     topic = job_data.get("topic", "Unknown Topic")
