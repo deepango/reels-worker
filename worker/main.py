@@ -15,6 +15,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 N8N_CALLBACK_URL = os.environ.get("N8N_CALLBACK_URL")
 TEMP_DIR = os.environ.get("TEMP_DIR", "/tmp/reels")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN")
 
 B2_ENDPOINT = os.environ.get("B2_ENDPOINT")
 B2_APPLICATION_KEY_ID = os.environ.get("B2_APPLICATION_KEY_ID")
@@ -37,7 +38,39 @@ Path(TEMP_DIR).mkdir(parents=True, exist_ok=True)
 def download_file_with_auth(url, filepath):
     """Download a file from a URL to a local path, handling B2 Auth if needed."""
     print(f"Downloading {url} to {filepath}...")
-    
+
+    # If it's a Replicate API prediction URL, we need to extract the actual image URL
+    if url.startswith("https://api.replicate.com/v1/predictions/"):
+        print("Detected Replicate API prediction URL, fetching actual result...")
+        if not REPLICATE_API_TOKEN:
+            raise RuntimeError("REPLICATE_API_TOKEN is missing in worker environment")
+        
+        headers = {"Authorization": f"Bearer {REPLICATE_API_TOKEN}"}
+        
+        # Max wait 5 minutes
+        for _ in range(60):
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            status = data.get("status")
+            if status == "succeeded":
+                output = data.get("output")
+                if isinstance(output, list) and len(output) > 0:
+                    url = output[0]  # The actual image URL
+                elif isinstance(output, str):
+                    url = output
+                else:
+                    raise Exception(f"Unexpected output format from Replicate: {output}")
+                print(f"Resolved Replicate image URL: {url}")
+                break
+            elif status in ["failed", "canceled"]:
+                raise Exception(f"Replicate prediction failed: {data.get('error')}")
+            
+            print(f"Replicate prediction status: {status}, waiting 5s...")
+            time.sleep(5)
+        else:
+            raise Exception("Timeout waiting for Replicate prediction to complete")
+
     # If it's a Backblaze B2 url, and we have credentials, use boto3 to download
     if "backblazeb2.com" in url and B2_ENDPOINT and B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY and B2_BUCKET_NAME:
         print("Using Boto3 to download from B2...")

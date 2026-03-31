@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@n8n/workflow-sdk": "^0.6.1",
     "pg": "^8.20.0"
   }
 }
