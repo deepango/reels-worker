@@ -1,0 +1,1167 @@
+{
+  "name": "Reels Video Pipeline (Production)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-video",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-generate",
+      "name": "Webhook - Generate Video",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "name",
+          "value": "video_jobs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{$json.body.customer_id}}",
+            "topic": "={{$json.body.topic}}",
+            "status": "pending"
+          },
+          "matchingColumns": [
+            "id"
+          ]
+        },
+        "options": {
+          "outputColumns": [
+            "id",
+            "topic",
+            "customer_id",
+            "created_at"
+          ]
+        }
+      },
+      "id": "pg-insert-job",
+      "name": "Postgres - Insert Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CRED_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": $env.ANTHROPIC_MODEL || \"claude-3-5-haiku-20241022\", \"max_tokens\": 2048, \"messages\": [ { \"role\": \"user\", \"content\": \"Generate a short 5-scene real-estate reel script for topic: \" + $(\"Webhook - Generate Video\").item.json.body.topic + \". Return strict JSON object with key scenes (array). Each scene object: scene_id (number), image_prompt (string), voiceover_text (string).\" } ] } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "anthropic-generate",
+      "name": "Anthropic - Generate Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ANTHROPIC_CRED_ID",
+          "name": "anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$(\"Postgres - Insert Job\").item.json.id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$(\"Webhook - Generate Video\").item.json.body.topic}}"
+            },
+            {
+              "name": "customer_id",
+              "type": "number",
+              "value": "={{$(\"Webhook - Generate Video\").item.json.body.customer_id}}"
+            },
+            {
+              "name": "scenes",
+              "type": "array",
+              "value": "={{ JSON.parse($json.content[0].text.replace(/```json\\n?|\\n?```/g, '').trim()).scenes }}"
+            }
+          ]
+        }
+      },
+      "id": "set-script-context",
+      "name": "Set - Script Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        920,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "scenes",
+        "include": "selectedOtherFields",
+        "fieldsToInclude": "job_id,topic,customer_id"
+      },
+      "id": "split-scenes",
+      "name": "Split - Scenes",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-scenes",
+      "name": "Loop - Scenes",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$json.job_id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$json.topic}}"
+            },
+            {
+              "name": "customer_id",
+              "type": "number",
+              "value": "={{$json.customer_id}}"
+            },
+            {
+              "name": "scene_id",
+              "type": "number",
+              "value": "={{$json.scenes.scene_id}}"
+            },
+            {
+              "name": "image_prompt",
+              "type": "string",
+              "value": "={{$json.scenes.image_prompt}}"
+            },
+            {
+              "name": "voiceover_text",
+              "type": "string",
+              "value": "={{$json.scenes.voiceover_text}}"
+            },
+            {
+              "name": "replicate_poll_count",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "replicate_max_polls",
+              "type": "number",
+              "value": 40
+            }
+          ]
+        }
+      },
+      "id": "set-scene-context",
+      "name": "Set - Scene Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 11
+      },
+      "id": "wait-rate-limit",
+      "name": "Wait - Replicate Rate Limit",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"version\": \"39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b\", \"input\": { \"prompt\": $json.image_prompt, \"width\": 1024, \"height\": 576 } } }}",
+        "options": {}
+      },
+      "id": "replicate-create",
+      "name": "Replicate - Create Prediction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1840,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_REPLICATE_CRED_ID",
+          "name": "replicate"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$(\"Set - Scene Context\").item.json.job_id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$(\"Set - Scene Context\").item.json.topic}}"
+            },
+            {
+              "name": "scene_id",
+              "type": "number",
+              "value": "={{$(\"Set - Scene Context\").item.json.scene_id}}"
+            },
+            {
+              "name": "voiceover_text",
+              "type": "string",
+              "value": "={{$(\"Set - Scene Context\").item.json.voiceover_text}}"
+            },
+            {
+              "name": "prediction_id",
+              "type": "string",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "prediction_get_url",
+              "type": "string",
+              "value": "={{$json.urls.get}}"
+            },
+            {
+              "name": "replicate_poll_count",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "replicate_max_polls",
+              "type": "number",
+              "value": 40
+            }
+          ]
+        }
+      },
+      "id": "set-replicate-meta",
+      "name": "Set - Replicate Meta",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2060,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "id": "wait-replicate",
+      "name": "Wait - Replicate Poll Interval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.prediction_get_url}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "replicate-get",
+      "name": "Replicate - Get Prediction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2500,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_REPLICATE_CRED_ID",
+          "name": "replicate"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.status}}",
+              "operation": "equal",
+              "value2": "succeeded"
+            }
+          ]
+        }
+      },
+      "id": "if-replicate-succeeded",
+      "name": "IF - Replicate Succeeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $(\"Set - Replicate Meta\").item.json.replicate_poll_count + 1 }}",
+              "operation": "smaller",
+              "value2": "={{ $(\"Set - Replicate Meta\").item.json.replicate_max_polls }}"
+            }
+          ]
+        }
+      },
+      "id": "if-replicate-continue",
+      "name": "IF - Replicate Continue Polling",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2940,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.job_id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.topic}}"
+            },
+            {
+              "name": "scene_id",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.scene_id}}"
+            },
+            {
+              "name": "voiceover_text",
+              "type": "string",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.voiceover_text}}"
+            },
+            {
+              "name": "prediction_get_url",
+              "type": "string",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.prediction_get_url}}"
+            },
+            {
+              "name": "replicate_poll_count",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.replicate_poll_count + 1}}"
+            },
+            {
+              "name": "replicate_max_polls",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.replicate_max_polls}}"
+            }
+          ]
+        }
+      },
+      "id": "set-replicate-next-poll",
+      "name": "Set - Replicate Next Poll",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3160,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.job_id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.topic}}"
+            },
+            {
+              "name": "scene_id",
+              "type": "number",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.scene_id}}"
+            },
+            {
+              "name": "voiceover_text",
+              "type": "string",
+              "value": "={{$(\"Set - Replicate Meta\").item.json.voiceover_text}}"
+            },
+            {
+              "name": "image_url",
+              "type": "string",
+              "value": "={{$json.output[0]}}"
+            }
+          ]
+        }
+      },
+      "id": "set-image-output",
+      "name": "Set - Image Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2940,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.elevenlabs.io/v1/text-to-speech/\" + $env.ELEVENLABS_VOICE_ID }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": $json.voiceover_text, \"model_id\": \"eleven_multilingual_v2\" } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audio_data"
+            }
+          }
+        }
+      },
+      "id": "elevenlabs-generate",
+      "name": "ElevenLabs - Generate Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3600,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ELEVENLABS_CRED_ID",
+          "name": "elevenlabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "={{$env.B2_BUCKET_NAME}}",
+        "binaryData": true,
+        "binaryPropertyName": "audio_data",
+        "fileName": "={{'tts-cache/' + $env.ELEVENLABS_VOICE_ID + '/' + $(\"Crypto - Hash Voiceover\").item.json.voiceover_hash + '.mpga'}}",
+        "additionalFields": {}
+      },
+      "id": "s3-upload-audio",
+      "name": "S3 - Upload Audio (B2)",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [
+        3820,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "s3": {
+          "id": "REPLACE_S3_B2_CRED_ID",
+          "name": "Backblaze B2 (S3)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_id",
+              "type": "number",
+              "value": "={{$(\"Set - Image Output\").item.json.job_id}}"
+            },
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "={{$(\"Set - Image Output\").item.json.topic}}"
+            },
+            {
+              "name": "scene_id",
+              "type": "number",
+              "value": "={{$(\"Set - Image Output\").item.json.scene_id}}"
+            },
+            {
+              "name": "image_url",
+              "type": "string",
+              "value": "={{$(\"Set - Image Output\").item.json.image_url}}"
+            },
+            {
+              "name": "audio_url",
+              "type": "string",
+              "value": "={{$env.B2_ENDPOINT + '/' + $env.B2_BUCKET_NAME + '/tts-cache/' + $env.ELEVENLABS_VOICE_ID + '/' + $(\"Crypto - Hash Voiceover\").item.json.voiceover_hash + '.mpga'}}"
+            }
+          ]
+        }
+      },
+      "id": "set-audio-output",
+      "name": "Set - Audio Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4040,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByFields",
+        "fieldsToMatchString": "scene_id",
+        "options": {}
+      },
+      "id": "merge-scene-assets",
+      "name": "Merge - Scene Assets by scene_id",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4260,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "scenes",
+        "options": {}
+      },
+      "id": "aggregate-scenes",
+      "name": "Aggregate - Final Scenes",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        4480,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "queue_payload",
+              "type": "object",
+              "value": "={{ { job_id: $(\"Postgres - Insert Job\").item.json.id, topic: $(\"Webhook - Generate Video\").item.json.body.topic, customer_id: $(\"Webhook - Generate Video\").item.json.body.customer_id, scenes: $json.scenes } }}"
+            }
+          ]
+        }
+      },
+      "id": "set-queue-payload",
+      "name": "Set - Queue Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4700,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "reels:jobs",
+        "messageData": "={{ JSON.stringify($json.queue_payload) }}",
+        "tail": true
+      },
+      "id": "redis-push",
+      "name": "Redis - Push Render Job",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        4920,
+        420
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_REDIS_CRED_ID",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "name",
+          "value": "video_jobs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{$(\"Postgres - Insert Job\").item.json.id}}",
+            "customer_id": "={{$json.queue_payload.customer_id}}",
+            "topic": "={{$json.queue_payload.topic}}",
+            "status": "processing",
+            "cost_breakdown": "={{ { anthropic: 0.01, replicate: 0.05, elevenlabs: 0.03 } }}",
+            "updated_at": "={{$now}}"
+          },
+          "matchingColumns": [
+            "id"
+          ]
+        },
+        "operation": "update",
+        "options": {}
+      },
+      "id": "pg-update-processing",
+      "name": "Postgres - Mark Processing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5140,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CRED_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, job_id: $(\"Postgres - Insert Job\").item.json.id, status: 'queued' } }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Queued",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        5360,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "name",
+          "value": "video_jobs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{$(\"Postgres - Insert Job\").item.json.id}}",
+            "status": "failed",
+            "error_logs": "={{$json.error || $json.message || 'scene processing failed'}}",
+            "updated_at": "={{$now}}"
+          },
+          "matchingColumns": [
+            "id"
+          ]
+        },
+        "operation": "update",
+        "options": {}
+      },
+      "id": "pg-mark-failed",
+      "name": "Postgres - Mark Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3380,
+        600
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CRED_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 500,
+        "responseBody": "={{ { ok: false, error: 'Workflow failed', job_id: $(\"Postgres - Insert Job\").item.json.id } }}",
+        "options": {}
+      },
+      "id": "respond-failed",
+      "name": "Respond - Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        3600,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "MD5",
+        "value": "={{$json.voiceover_text}}",
+        "dataPropertyName": "voiceover_hash"
+      },
+      "id": "crypto-hash-voiceover",
+      "name": "Crypto - Hash Voiceover",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        3160,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "bucketName": "={{$env.B2_BUCKET_NAME}}",
+        "fileName": "={{'tts-cache/' + $env.ELEVENLABS_VOICE_ID + '/' + $json.voiceover_hash + '.mpga'}}"
+      },
+      "id": "s3-check-cache",
+      "name": "S3 - Check Cache",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [
+        3380,
+        180
+      ],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "s3": {
+          "id": "REPLACE_S3_B2_CRED_ID",
+          "name": "Backblaze B2 (S3)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Generate Video": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Insert Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Insert Job": {
+      "main": [
+        [
+          {
+            "node": "Anthropic - Generate Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic - Generate Script": {
+      "main": [
+        [
+          {
+            "node": "Set - Script Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Script Context": {
+      "main": [
+        [
+          {
+            "node": "Split - Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split - Scenes": {
+      "main": [
+        [
+          {
+            "node": "Loop - Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop - Scenes": {
+      "main": [
+        [
+          {
+            "node": "Aggregate - Final Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set - Scene Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Scene Context": {
+      "main": [
+        [
+          {
+            "node": "Wait - Replicate Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait - Replicate Rate Limit": {
+      "main": [
+        [
+          {
+            "node": "Replicate - Create Prediction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replicate - Create Prediction": {
+      "main": [
+        [
+          {
+            "node": "Set - Replicate Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Replicate Meta": {
+      "main": [
+        [
+          {
+            "node": "Wait - Replicate Poll Interval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait - Replicate Poll Interval": {
+      "main": [
+        [
+          {
+            "node": "Replicate - Get Prediction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replicate - Get Prediction": {
+      "main": [
+        [
+          {
+            "node": "IF - Replicate Succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Replicate Succeeded": {
+      "main": [
+        [
+          {
+            "node": "Set - Image Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - Replicate Continue Polling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Replicate Continue Polling": {
+      "main": [
+        [
+          {
+            "node": "Set - Replicate Next Poll",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres - Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Replicate Next Poll": {
+      "main": [
+        [
+          {
+            "node": "Wait - Replicate Poll Interval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Image Output": {
+      "main": [
+        [
+          {
+            "node": "Merge - Scene Assets by scene_id",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Crypto - Hash Voiceover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs - Generate Audio": {
+      "main": [
+        [
+          {
+            "node": "S3 - Upload Audio (B2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S3 - Upload Audio (B2)": {
+      "main": [
+        [
+          {
+            "node": "Set - Audio Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Audio Output": {
+      "main": [
+        [
+          {
+            "node": "Merge - Scene Assets by scene_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge - Scene Assets by scene_id": {
+      "main": [
+        [
+          {
+            "node": "Loop - Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate - Final Scenes": {
+      "main": [
+        [
+          {
+            "node": "Set - Queue Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Queue Payload": {
+      "main": [
+        [
+          {
+            "node": "Redis - Push Render Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis - Push Render Job": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Mark Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Mark Processing": {
+      "main": [
+        [
+          {
+            "node": "Respond - Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Mark Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond - Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto - Hash Voiceover": {
+      "main": [
+        [
+          {
+            "node": "S3 - Check Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S3 - Check Cache": {
+      "main": [
+        [
+          {
+            "node": "Set - Audio Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ElevenLabs - Generate Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "versionId": "production-template-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
