@@ -1,0 +1,37 @@
+services:
+  - type: worker
+    name: reels-video-processor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: starter
+    # No dockerCommand override — use CMD from Dockerfile: python3 -u main.py
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: N8N_CALLBACK_URL
+        sync: false
+      - key: B2_ENDPOINT
+        sync: false
+      - key: B2_APPLICATION_KEY_ID
+        sync: false
+      - key: B2_APPLICATION_KEY
+        sync: false
+      - key: B2_BUCKET_NAME
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: BACKGROUND_MUSIC_BASE_URL
+        sync: false
+      - key: BRAND_NAME
+        sync: false
+      - key: TEMP_DIR
+        value: /tmp/reels
+    disk:
+      name: reels-tmp
+      mountPath: /tmp/reels
+      sizeGB: 5

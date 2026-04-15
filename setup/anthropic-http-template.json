@@ -4,17 +4,23 @@
   "headers": {
     "x-api-key": "{{$env.ANTHROPIC_API_KEY}}",
     "anthropic-version": "2023-06-01",
+    "anthropic-beta": "prompt-caching-2024-07-31",
     "content-type": "application/json"
   },
   "body": {
-    "model": "claude-3-5-haiku-20241022",
-    "max_tokens": 700,
-    "temperature": 0.7,
-    "system": "You are a real-estate reel scriptwriter. Output strict JSON only.",
+    "model": "claude-haiku-4-5",
+    "max_tokens": 4096,
+    "system": [
+      {
+        "type": "text",
+        "text": "You are an expert real-estate video scriptwriter specialising in short-form Reels and TikToks for the Indian property market. Your scripts must be punchy, aspirational, and optimised for vertical 9:16 video.\n\nFor each scene provide:\n- image_prompt: a vivid, photorealistic description for an AI image model (lighting, angle, style, mood). Always specify \"vertical portrait 9:16 composition\" and \"ultra-realistic architectural photography\".\n- voice_line: a concise, conversational voiceover line (max 15 words) that complements the image.\n\nOutput STRICT JSON only — no markdown, no commentary, no code fences.",
+        "cache_control": { "type": "ephemeral" }
+      }
+    ],
     "messages": [
       {
         "role": "user",
-        "content": "Create a 30-second script with 5 scenes for topic: {{$json.topic}}. Return JSON: {title, hook, scenes:[{image_prompt, voice_line}], cta}."
+        "content": "Create a 30-second real-estate Reel script with exactly 5 scenes for: {{$json.topic}}.\n\nReturn this exact JSON structure:\n{\n  \"title\": \"<catchy reel title>\",\n  \"hook\": \"<opening hook text overlay, max 8 words>\",\n  \"scenes\": [\n    {\n      \"scene_number\": 1,\n      \"image_prompt\": \"<detailed photorealistic image description, 9:16 vertical, ultra-realistic architectural photography>\",\n      \"voice_line\": \"<voiceover text, max 15 words>\"\n    }\n  ],\n  \"cta\": \"<call-to-action text overlay, max 8 words>\"\n}"
       }
     ]
   }
