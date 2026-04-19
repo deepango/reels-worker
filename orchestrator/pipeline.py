@@ -17,51 +17,60 @@ TEST_SCENES = [
 
 
 def run_test_job(job_id: int, topic: str, customer_id: int):
-    """Push hardcoded test scenes directly to Redis — no AI calls."""
+    log.info(f"[pipeline] ====== TEST JOB {job_id} START | customer={customer_id} | topic='{topic}' ======")
     try:
         payload = {"job_id": job_id, "topic": topic, "customer_id": customer_id, "scenes": TEST_SCENES}
+        log.info(f"[pipeline] pushing test payload to Redis queue")
         push_job(payload)
         db.mark_processing(job_id)
         db.decrement_quota(customer_id)
-        log.info(f"Test job {job_id} pushed to queue")
+        log.info(f"[pipeline] ====== TEST JOB {job_id} QUEUED ======")
     except Exception as e:
-        log.error(f"Test job {job_id} failed: {e}")
+        log.error(f"[pipeline] TEST JOB {job_id} FAILED: {type(e).__name__}: {e}", exc_info=True)
         db.mark_failed(job_id, str(e))
         raise
 
 
 def run_real_job(job_id: int, topic: str, customer_id: int):
-    """Full pipeline: Claude script → per-scene Replicate + ElevenLabs → Redis."""
+    log.info(f"[pipeline] ====== REAL JOB {job_id} START | customer={customer_id} | topic='{topic}' ======")
+    t_start = time.time()
     try:
-        log.info(f"Job {job_id}: generating script for topic='{topic}'")
+        log.info(f"[pipeline] step 1/3 — Claude script generation")
         scenes = anthropic.generate_script(topic)
+        log.info(f"[pipeline] script done in {time.time()-t_start:.1f}s | {len(scenes)} scenes")
 
         scene_assets = []
         for i, scene in enumerate(scenes):
+            sid = scene["scene_id"]
             if i > 0:
-                log.info(f"Job {job_id}: waiting {SCENE_RATE_LIMIT_WAIT}s before scene {i+1}")
+                log.info(f"[pipeline] rate-limit wait {SCENE_RATE_LIMIT_WAIT}s before scene {sid}")
                 time.sleep(SCENE_RATE_LIMIT_WAIT)
 
-            log.info(f"Job {job_id}: scene {scene['scene_id']} — generating image")
+            t_scene = time.time()
+            log.info(f"[pipeline] scene {sid}/{len(scenes)} — step 2: Replicate image")
             image_url = replicate.generate_image(scene["image_prompt"])
+            log.info(f"[pipeline] scene {sid} image done in {time.time()-t_scene:.1f}s | url={image_url}")
 
-            log.info(f"Job {job_id}: scene {scene['scene_id']} — generating audio")
+            log.info(f"[pipeline] scene {sid}/{len(scenes)} — step 3: ElevenLabs audio")
             audio_url = elevenlabs.get_or_generate_audio(scene["voiceover_text"])
+            log.info(f"[pipeline] scene {sid} audio done | url={audio_url}")
 
             scene_assets.append({
-                "scene_id": scene["scene_id"],
+                "scene_id": sid,
                 "image_url": image_url,
                 "audio_url": audio_url,
                 "voiceover_text": scene["voiceover_text"],
             })
+            log.info(f"[pipeline] scene {sid} complete | elapsed={time.time()-t_start:.1f}s")
 
         payload = {"job_id": job_id, "topic": topic, "customer_id": customer_id, "scenes": scene_assets}
+        log.info(f"[pipeline] all {len(scene_assets)} scenes done | pushing to Redis")
         push_job(payload)
         db.mark_processing(job_id)
         db.decrement_quota(customer_id)
-        log.info(f"Job {job_id}: pushed to queue, {len(scene_assets)} scenes")
+        log.info(f"[pipeline] ====== REAL JOB {job_id} QUEUED | total_elapsed={time.time()-t_start:.1f}s ======")
 
     except Exception as e:
-        log.error(f"Job {job_id} failed: {e}")
-        db.mark_failed(job_id, str(e))
+        log.error(f"[pipeline] ====== REAL JOB {job_id} FAILED after {time.time()-t_start:.1f}s: {type(e).__name__}: {e} ======", exc_info=True)
+        db.mark_failed(job_id, f"{type(e).__name__}: {e}")
         raise
