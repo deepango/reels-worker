@@ -227,7 +227,7 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
         "-filter_complex", f"[0:v]{vf}[v];{audio_filter}",
         "-map", "[v]", "-map", "[a]",
         # CRF 18 = high-quality master for the scene — one re-encode only.
-        # Intermediate merges use lossless CRF 0 so this quality is preserved.
+        # Intermediate merges use CRF 15 so quality is preserved without OOM risk.
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-profile:v", "high", "-level", "4.1",
         "-c:a", "aac", "-b:a", "192k",
@@ -247,9 +247,11 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
 def _xfade_two(clip_a, clip_b, output_path, xfade_dur, final=False):
     """Merge exactly two clips with an xfade crossfade. Low memory: only 2 inputs.
 
-    Intermediate merges use lossless H.264 (CRF 0) so clip 1 doesn't get
-    re-encoded 4× by the time it reaches the final output. Only the last merge
-    uses the lossy CRF 22 target quality.
+    Intermediate merges use high-quality H.264 (CRF 15, ultrafast) so accumulated
+    clips stay small (10-20× smaller than CRF 0) without visible quality loss.
+    CRF 0 caused OOM because the 24 s accumulated clip bloated to 300-400 MB and
+    FFmpeg's xfade decode buffers pushed the process over the 2 GB memory limit.
+    Only the final merge uses the target quality CRF 22.
     """
     dur_a = get_duration(clip_a)
     offset = max(0.0, dur_a - xfade_dur)
@@ -261,8 +263,9 @@ def _xfade_two(clip_a, clip_b, output_path, xfade_dur, final=False):
         codec = ["-c:v", "libx264", "-preset", "fast", "-crf", "22",
                  "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
     else:
-        # Lossless intermediate: no quality loss, fast encode, cleaned up after use
-        codec = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+        # High-quality intermediate (CRF 15): visually near-lossless but 10-20×
+        # smaller than CRF 0, preventing OOM during xfade decode of accumulated clips.
+        codec = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "15",
                  "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p"]
     cmd = (
         ["ffmpeg", "-y", "-i", clip_a, "-i", clip_b,
