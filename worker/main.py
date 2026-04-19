@@ -134,18 +134,17 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     - Outputs H.264 + AAC at 25 fps
     """
     duration = min(get_duration(audio_path), 30.0)  # cap at 30s so long music files don't OOM
-    # Add a tiny tail so the last frame isn't cut right at the audio end
-    total_frames = max(int((duration + 0.1) * VIDEO_FPS), 10)
+    # Add 0.5s tail so there's breathing room after the last word before the crossfade
+    total_frames = max(int((duration + 0.5) * VIDEO_FPS), 10)
 
     # Scale up 50% beyond target so Ken Burns zoom never hits a pixelated edge.
     # 1080 * 1.5 = 1620, 1920 * 1.5 = 2880
     prescale = "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880"
 
-    # z = 'zoom + 0.0006' means: each frame adds 0.0006 to the previous zoom.
-    # Starting from zoom=1.0: at frame 125 (5 s) z ≈ 1.075 — a very subtle drift.
-    # At z=1.075 on a 1620-px source: reads 1620/1.075 ≈ 1507 px → scales to 1080. Fine.
+    # z = 'zoom+0.003': 5× faster than the old 0.0006 — clearly visible drift.
+    # At 25fps over 4s: zoom goes from 1.0 → 1.3, reads 1620/1.3 ≈ 1246px → scales to 1080. Fine.
     ken_burns = (
-        f"zoompan=z='zoom+0.0006':d={total_frames}:"
+        f"zoompan=z='zoom+0.003':d={total_frames}:"
         f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
         f"s=1080x1920:fps={VIDEO_FPS},"
         "setsar=1"
@@ -187,25 +186,32 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     return output_path
 
 
-def _xfade_two(clip_a, clip_b, output_path, xfade_dur):
-    """Merge exactly two clips with an xfade crossfade. Low memory: only 2 inputs."""
+def _xfade_two(clip_a, clip_b, output_path, xfade_dur, final=False):
+    """Merge exactly two clips with an xfade crossfade. Low memory: only 2 inputs.
+
+    Intermediate merges use lossless H.264 (CRF 0) so clip 1 doesn't get
+    re-encoded 4× by the time it reaches the final output. Only the last merge
+    uses the lossy CRF 22 target quality.
+    """
     dur_a = get_duration(clip_a)
     offset = max(0.0, dur_a - xfade_dur)
     filter_complex = (
         f"[0:v][1:v]xfade=transition=fade:duration={xfade_dur:.3f}:offset={offset:.3f}[xvout];"
         f"[0:a][1:a]acrossfade=d={xfade_dur:.3f}[xaout]"
     )
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", clip_a, "-i", clip_b,
-        "-filter_complex", filter_complex,
-        "-map", "[xvout]", "-map", "[xaout]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-        "-c:a", "aac", "-b:a", "192k",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        output_path,
-    ]
+    if final:
+        codec = ["-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                 "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+    else:
+        # Lossless intermediate: no quality loss, fast encode, cleaned up after use
+        codec = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0",
+                 "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p"]
+    cmd = (
+        ["ffmpeg", "-y", "-i", clip_a, "-i", clip_b,
+         "-filter_complex", filter_complex,
+         "-map", "[xvout]", "-map", "[xaout]"]
+        + codec + [output_path]
+    )
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg xfade merge failed:\n{result.stderr[-3000:]}")
@@ -232,7 +238,7 @@ def concat_with_crossfade(scene_videos, output_path):
         is_last = (i == n - 1)
         next_out = output_path if is_last else os.path.join(tmp_dir, f"_merge_{i}.mp4")
         print(f"Merging scene {i}/{n-1} into running clip...")
-        _xfade_two(current, scene_videos[i], next_out, xfade)
+        _xfade_two(current, scene_videos[i], next_out, xfade, final=is_last)
         # Remove intermediate temp file (not the original scene files)
         if current != scene_videos[0] and os.path.exists(current):
             os.remove(current)
