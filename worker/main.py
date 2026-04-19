@@ -187,10 +187,35 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     return output_path
 
 
+def _xfade_two(clip_a, clip_b, output_path, xfade_dur):
+    """Merge exactly two clips with an xfade crossfade. Low memory: only 2 inputs."""
+    dur_a = get_duration(clip_a)
+    offset = max(0.0, dur_a - xfade_dur)
+    filter_complex = (
+        f"[0:v][1:v]xfade=transition=fade:duration={xfade_dur:.3f}:offset={offset:.3f}[xvout];"
+        f"[0:a][1:a]acrossfade=d={xfade_dur:.3f}[xaout]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", clip_a, "-i", clip_b,
+        "-filter_complex", filter_complex,
+        "-map", "[xvout]", "-map", "[xaout]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg xfade merge failed:\n{result.stderr[-3000:]}")
+
+
 def concat_with_crossfade(scene_videos, output_path):
     """
-    Concatenate scene videos with smooth crossfade dissolves (video + audio).
-    Falls back to simple copy if fewer than 2 scenes.
+    Concatenate scene videos with smooth crossfade dissolves using sequential
+    pairwise merges. Each merge uses only 2 inputs at a time, keeping memory
+    bounded regardless of scene count (avoids OOM on chained xfade).
     """
     n = len(scene_videos)
     if n == 1:
@@ -198,53 +223,20 @@ def concat_with_crossfade(scene_videos, output_path):
         return
 
     durations = [get_duration(v) for v in scene_videos]
-    # Crossfade must be shorter than every scene; cap at 20% of the shortest scene.
     xfade = min(CROSSFADE_DURATION, min(durations) * 0.2)
-    inputs = []
-    for v in scene_videos:
-        inputs += ["-i", v]
+    tmp_dir = os.path.dirname(output_path)
 
-    vfilters = []
-    afilters = []
-    cumulative_offset = 0.0
-
-    # Build chained xfade (video) and acrossfade (audio) filters.
-    for i in range(n - 1):
-        cumulative_offset += durations[i] - xfade
-        v_in_a = "[0:v]" if i == 0 else f"[xv{i - 1}]"
-        v_in_b = f"[{i + 1}:v]"
-        v_out = "[xvout]" if i == n - 2 else f"[xv{i}]"
-        vfilters.append(
-            f"{v_in_a}{v_in_b}xfade=transition=fade:"
-            f"duration={xfade:.3f}:offset={cumulative_offset:.3f}{v_out}"
-        )
-
-        a_in_a = "[0:a]" if i == 0 else f"[xa{i - 1}]"
-        a_in_b = f"[{i + 1}:a]"
-        a_out = "[xaout]" if i == n - 2 else f"[xa{i}]"
-        afilters.append(
-            f"{a_in_a}{a_in_b}acrossfade=d={xfade:.3f}{a_out}"
-        )
-
-    filter_complex = ";".join(vfilters + afilters)
-
-    cmd = (
-        ["ffmpeg", "-y"]
-        + inputs
-        + [
-            "-filter_complex", filter_complex,
-            "-map", "[xvout]",
-            "-map", "[xaout]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-            "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-    )
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg crossfade concat failed:\n{result.stderr[-3000:]}")
+    # Merge pairs sequentially: (A+B)→tmp, (tmp+C)→tmp2, ...
+    current = scene_videos[0]
+    for i in range(1, n):
+        is_last = (i == n - 1)
+        next_out = output_path if is_last else os.path.join(tmp_dir, f"_merge_{i}.mp4")
+        print(f"Merging scene {i}/{n-1} into running clip...")
+        _xfade_two(current, scene_videos[i], next_out, xfade)
+        # Remove intermediate temp file (not the original scene files)
+        if current != scene_videos[0] and os.path.exists(current):
+            os.remove(current)
+        current = next_out
 
 
 def add_music_and_branding(video_path, output_path, topic="", music_path=None, brand_name=None):
