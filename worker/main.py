@@ -121,7 +121,7 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     - Normalises audio to EBU R128 -16 LUFS
     - Outputs H.264 + AAC at 25 fps
     """
-    duration = get_duration(audio_path)
+    duration = min(get_duration(audio_path), 30.0)  # cap at 30s so long music files don't OOM
     # Add a tiny tail so the last frame isn't cut right at the audio end
     total_frames = max(int((duration + 0.1) * VIDEO_FPS), 10)
 
