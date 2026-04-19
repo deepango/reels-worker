@@ -258,8 +258,9 @@ def add_music_and_branding(video_path, output_path, topic="", music_path=None, b
     vid_idx = 1 if has_music else 0
 
     filters = []
-    vmap = f"[{vid_idx}:v]"
-    amap = f"[{vid_idx}:a]"
+    # Direct stream refs use no brackets; filter output refs use [label] brackets.
+    vmap = f"{vid_idx}:v"
+    amap = f"{vid_idx}:a"
 
     if has_brand:
         brand = _esc(brand_name)
@@ -286,7 +287,7 @@ def add_music_and_branding(video_path, output_path, topic="", music_path=None, b
     cmd = (
         ["ffmpeg", "-y"]
         + inputs
-        + ["-filter_complex", ";".join(filters)]
+        + (["-filter_complex", ";".join(filters)] if filters else [])
         + ["-map", vmap, "-map", amap]
         + ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
         + ["-c:a", "aac", "-b:a", "192k"]
