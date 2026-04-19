@@ -2,7 +2,7 @@ import time
 import logging
 from config import SCENE_RATE_LIMIT_WAIT
 import db
-from queue import push_job
+from job_queue import push_job
 from providers import anthropic, replicate, elevenlabs
 
 log = logging.getLogger(__name__)
