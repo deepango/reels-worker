@@ -538,14 +538,10 @@ def process_job(job_data):
                 final_video,
                 B2_BUCKET_NAME,
                 object_name,
-                ExtraArgs={"ContentType": "video/mp4"},
+                ExtraArgs={"ContentType": "video/mp4", "ACL": "public-read"},
             )
-            # Generate a presigned URL valid for 7 days (bucket is private)
-            final_b2_url = b2.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": B2_BUCKET_NAME, "Key": object_name},
-                ExpiresIn=604800,
-            )
+            endpoint_host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
+            final_b2_url = f"https://{endpoint_host}/{B2_BUCKET_NAME}/{object_name}"
             print(f"Uploaded: {final_b2_url}")
         else:
             print("B2 credentials missing, skipping upload.")
