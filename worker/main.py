@@ -42,7 +42,9 @@ BRAND_NAME = os.environ.get("BRAND_NAME")
 
 QUEUE_NAME = "reels:jobs"
 VIDEO_FPS = 25
-CROSSFADE_DURATION = 0.4  # seconds overlap between scenes
+# Punchy cuts for Instagram attention — 0.15 s is near-subliminal but softens
+# the hard edge vs. 0.4 s which reads as "slideshow".
+CROSSFADE_DURATION = 0.15  # seconds overlap between scenes
 
 # Fonts — installed via Dockerfile. Use ``fontfile`` in drawtext rather than
 # ``font`` + ``style`` because FFmpeg drawtext doesn't have a ``style`` option
@@ -147,34 +149,121 @@ def get_duration(filepath):
     return float(result.stdout.strip())
 
 
-def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
+def _is_video_file(path: str) -> bool:
+    """Cheap extension-based check. Matches what we download from Kling (mp4) vs. test (jpg/png)."""
+    return path.lower().endswith((".mp4", ".mov", ".webm", ".mkv"))
+
+
+def _caption_drawtext(voiceover_text: str) -> str:
+    """Return the `,drawtext=...` filter segment for burning captions.
+
+    Kept as a helper so both the still-image (Ken Burns) and pre-animated
+    video branches share the same caption styling.
     """
-    Render a single scene video:
-      • Prescale to 1.5× target (1620×2880) for lossless Ken Burns headroom
-      • Ken Burns: smooth slow push-in with eased start via min() clamp
-      • EBU R128 loudnorm at -16 LUFS for broadcast-safe audio
-      • Caption: word-wrapped, large semi-bold text with gradient scrim
-        and subtle drop-shadow for legibility on any background
-      • Output: H.264 High Profile, CRF 18 (high quality scene master),
-        yuv420p for maximum device compatibility
+    if not voiceover_text:
+        return ""
+    # _wrap_text returns a list; _esc each line THEN join with \n so the
+    # backslash-doubling in _esc never mangles the newline separator.
+    caption = r"\n".join(_esc(ln) for ln in _wrap_text(voiceover_text))
+    return (
+        f",drawtext=text='{caption}'"
+        f":fontfile={CAPTION_FONT}"
+        ":fontcolor=white"
+        ":fontsize=58"
+        ":shadowcolor=black@0.75"
+        ":shadowx=2:shadowy=2"
+        ":borderw=0"
+        ":line_spacing=10"
+        ":x=(w-text_w)/2"
+        ":y=h-text_h-160"
+        ":expansion=none"
+        f":alpha='if(lt(n,6),n/6,1)'"
+    )
+
+
+def make_scene_video(source_path, audio_path, output_path, voiceover_text=None):
+    """Render a single scene video.
+
+    Dual-mode:
+      • Pre-animated video input (Kling MP4): use as-is, replace audio with
+        voiceover, burn captions. Match video duration to voiceover length.
+      • Static image input (picsum test mode, or legacy flow): apply Ken
+        Burns zoompan to create motion, then caption + audio as before.
+
+    Output in both cases:
+      • 1080×1920 H.264 High profile, CRF 18, yuv420p for device compatibility
+      • EBU R128 loudnorm at -16 LUFS (broadcast-safe audio)
+    """
+    if _is_video_file(source_path):
+        return _make_video_scene(source_path, audio_path, output_path, voiceover_text)
+    return _make_image_scene(source_path, audio_path, output_path, voiceover_text)
+
+
+def _make_video_scene(video_path, audio_path, output_path, voiceover_text=None):
+    """Combine a pre-animated Kling clip with the voiceover audio + captions.
+
+    The Kling clip already contains natural camera motion; we do NOT re-animate.
+    We just scale/crop to 1080×1920 (in case the clip came back slightly off
+    aspect), burn the caption, and swap in the voiceover as the audio track.
+    """
+    audio_duration = get_duration(audio_path)
+    video_duration = get_duration(video_path)
+    # Scene runs for min(audio, video) — the voiceover should never be cut,
+    # but if it's longer than 5 s the tail plays over the last frame of video.
+    # Add 0.3 s tail padding after the voiceover before the next crossfade.
+    duration = min(max(audio_duration, 0.1), max(video_duration, 0.1))
+
+    # Scale/crop video to 1080×1920 just in case (Kling 9:16 should already match).
+    vf_chain = (
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,"
+        f"setsar=1,fps={VIDEO_FPS}"
+    )
+    vf_chain += _caption_drawtext(voiceover_text)
+
+    # Audio: loudnorm the voiceover; atrim to the scene duration.
+    audio_filter = (
+        f"[1:a]atrim=end={duration},"
+        "loudnorm=I=-16:LRA=7:TP=-2:dual_mono=true"
+        "[a]"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-i", audio_path,
+        "-t", f"{duration:.3f}",
+        "-filter_complex", f"[0:v]{vf_chain}[v];{audio_filter}",
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-profile:v", "high", "-level", "4.1",
+        "-c:a", "aac", "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-r", str(VIDEO_FPS),
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"FFmpeg video-scene render failed for {output_path}:\n{result.stderr[-3000:]}"
+        )
+    return output_path
+
+
+def _make_image_scene(img_path, audio_path, output_path, voiceover_text=None):
+    """Legacy still-image path (test mode, or degraded fallback).
+
+    Applies the Ken Burns zoompan to create motion from a single frame.
+    Kept identical to the previous behaviour so test-mode output is unchanged.
     """
     duration = min(get_duration(audio_path), 30.0)
-    # 0.5 s breathing room after the last word before the crossfade begins
     total_frames = max(int((duration + 0.5) * VIDEO_FPS), 10)
 
-    # ── Prescale ──────────────────────────────────────────────────────────────
-    # 1.5× target gives ~33% zoom headroom before hitting the source edge.
-    # lanczos is the highest-quality FFmpeg downscale kernel for still imagery.
     prescale = (
         "scale=1620:2880:flags=lanczos"
         ":force_original_aspect_ratio=increase,"
         "crop=1620:2880"
     )
-
-    # ── Ken Burns ─────────────────────────────────────────────────────────────
-    # zoom+0.0015 per frame @ 25fps = 3.75%/s — clearly visible, not aggressive.
-    # min(zoom,1.5) hard-caps so we never push past the prescaled boundary.
-    # The centre-pivot x/y formula keeps the subject locked in frame.
     ken_burns = (
         f"zoompan="
         f"z='min(zoom+0.0015,1.5)':"
@@ -185,36 +274,7 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
         f"fps={VIDEO_FPS},"
         "setsar=1"
     )
-
-    vf = f"{prescale},{ken_burns}"
-
-    # ── Caption ───────────────────────────────────────────────────────────────
-    # Two-layer technique used in broadcast:
-    #   Layer 1 — gradient scrim: a semi-transparent black rectangle behind the
-    #             text block gives guaranteed contrast regardless of image content.
-    #   Layer 2 — drawtext: white text with a tight 2px shadow offset for depth.
-    #
-    # shadowx/shadowy at (2,2) is the classic broadcast drop-shadow — enough to
-    # read on white backgrounds without looking like a black halo.
-    # alpha fade-in over first 6 frames (0.24 s) softens the text appearance.
-    if voiceover_text:
-        # _wrap_text returns a list; _esc each line THEN join with \n so the
-        # backslash-doubling in _esc never mangles the newline separator.
-        caption = r"\n".join(_esc(ln) for ln in _wrap_text(voiceover_text))
-        vf += (
-            f",drawtext=text='{caption}'"
-            f":fontfile={CAPTION_FONT}"
-            ":fontcolor=white"
-            ":fontsize=58"
-            ":shadowcolor=black@0.75"
-            ":shadowx=2:shadowy=2"
-            ":borderw=0"
-            ":line_spacing=10"
-            ":x=(w-text_w)/2"
-            ":y=h-text_h-160"
-            ":expansion=none"
-            f":alpha='if(lt(n,6),n/6,1)'"
-        )
+    vf = f"{prescale},{ken_burns}" + _caption_drawtext(voiceover_text)
 
     # ── Audio ─────────────────────────────────────────────────────────────────
     # loudnorm two-pass would be ideal but adds latency; single-pass with
@@ -499,24 +559,48 @@ def resolve_and_download_audio(scene, audio_path):
 
 
 def _download_scene(args):
-    """Download image + audio for a single scene. Designed for ThreadPoolExecutor."""
+    """Download source media + audio for a single scene. Designed for ThreadPoolExecutor.
+
+    Accepts either payload shape:
+      • New (Kling-based):  scene['video_url']  — points to an MP4 clip
+      • Legacy/test:        scene['image_url']  — points to a static image
+    The file extension is preserved from the URL so make_scene_video can
+    detect whether to apply Ken Burns (image) or use the clip as-is (video).
+    """
     i, scene, job_dir = args
-    img_path = os.path.join(job_dir, f"scene_{i}.jpg")
+
+    # Prefer the new key name but fall back to legacy for backwards compat.
+    source_url = scene.get("video_url") or scene.get("image_url")
+    if not source_url:
+        raise ValueError(f"Scene {i} missing both 'video_url' and 'image_url'")
+
+    # Pick an extension that reflects the source (mp4 vs. jpg) so downstream
+    # make_scene_video can branch on it. Default to .jpg for unknown types.
+    url_lower = source_url.lower().split("?", 1)[0]
+    if url_lower.endswith((".mp4", ".mov", ".webm", ".mkv")):
+        ext = os.path.splitext(url_lower)[1]
+    elif url_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        ext = os.path.splitext(url_lower)[1]
+    else:
+        # Heuristic: Replicate/Kling delivery URLs often omit an extension.
+        # Treat as mp4 if the URL contains 'kling' or 'video'; else jpg.
+        if "kling" in url_lower or "video" in url_lower:
+            ext = ".mp4"
+        else:
+            ext = ".jpg"
+
+    src_path = os.path.join(job_dir, f"scene_{i}{ext}")
     audio_path = os.path.join(job_dir, f"scene_{i}.mp3")
 
-    image_url = scene.get("image_url")
-    if not image_url:
-        raise ValueError(f"Scene {i} missing image_url")
-
-    download_file_with_auth(image_url, img_path)
+    download_file_with_auth(source_url, src_path)
     resolve_and_download_audio(scene, audio_path)
 
-    if not os.path.exists(img_path) or os.path.getsize(img_path) == 0:
-        raise FileNotFoundError(f"Empty or missing image: {img_path}")
+    if not os.path.exists(src_path) or os.path.getsize(src_path) == 0:
+        raise FileNotFoundError(f"Empty or missing source media: {src_path}")
     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
         raise FileNotFoundError(f"Empty or missing audio: {audio_path}")
 
-    return i, img_path, audio_path
+    return i, src_path, audio_path
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +625,9 @@ def process_job(job_data):
     Path(job_dir).mkdir(parents=True, exist_ok=True)
 
     try:
-        # Step 1: Download all image + audio assets in parallel (I/O bound)
+        # Step 1: Download source media + audio in parallel (I/O bound).
+        # Source media is an MP4 (Kling) in real mode or a JPG (picsum) in test mode;
+        # make_scene_video branches on file extension.
         print(f"Downloading assets for {len(scenes)} scenes in parallel...")
         raw_files = [None] * len(scenes)
         with ThreadPoolExecutor(max_workers=len(scenes)) as ex:
@@ -550,18 +636,23 @@ def process_job(job_data):
                 for i, scene in enumerate(scenes)
             }
             for fut in as_completed(futures):
-                i, img_path, audio_path = fut.result()  # raises on error
-                raw_files[i] = (img_path, audio_path)
+                i, src_path, audio_path = fut.result()  # raises on error
+                raw_files[i] = (src_path, audio_path)
 
         print(f"Downloaded assets for {len(raw_files)} scenes.")
 
-        # Step 2: Render each scene — Ken Burns zoom + audio normalisation + captions
+        # Step 2: Render each scene.
+        #   • If source is a pre-animated video (Kling mp4): just scale/caption/loudnorm.
+        #   • If source is a still image (picsum test): apply Ken Burns zoompan.
+        # Output filename is 'rendered_scene_{i}.mp4' so we never collide with the
+        # source mp4 at 'scene_{i}.mp4'.
         scene_videos = []
-        for i, (img, aud) in enumerate(raw_files):
-            scene_video = os.path.join(job_dir, f"scene_{i}.mp4")
+        for i, (src, aud) in enumerate(raw_files):
+            scene_video = os.path.join(job_dir, f"rendered_scene_{i}.mp4")
             voiceover = scenes[i].get("voiceover_text")
-            print(f"Rendering scene {i + 1}/{len(raw_files)} with Ken Burns...")
-            make_scene_video(img, aud, scene_video, voiceover_text=voiceover)
+            kind = "video clip" if _is_video_file(src) else "still image"
+            print(f"Rendering scene {i + 1}/{len(raw_files)} from {kind}...")
+            make_scene_video(src, aud, scene_video, voiceover_text=voiceover)
             scene_videos.append(scene_video)
 
         # Step 3: Concatenate with crossfade dissolves
