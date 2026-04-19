@@ -35,3 +35,32 @@ services:
       name: reels-tmp
       mountPath: /tmp/reels
       sizeGB: 5
+
+  - type: web
+    name: reels-orchestrator
+    runtime: docker
+    dockerfilePath: ./orchestrator/Dockerfile
+    dockerContext: ./orchestrator
+    region: oregon
+    plan: starter
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: B2_ENDPOINT
+        sync: false
+      - key: B2_APPLICATION_KEY_ID
+        sync: false
+      - key: B2_APPLICATION_KEY
+        sync: false
+      - key: B2_BUCKET_NAME
+        sync: false
+      - key: ORCHESTRATOR_CALLBACK_URL
+        sync: false
