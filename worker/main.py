@@ -538,7 +538,7 @@ def process_job(job_data):
                 final_video,
                 B2_BUCKET_NAME,
                 object_name,
-                ExtraArgs={"ContentType": "video/mp4", "ACL": "public-read"},
+                ExtraArgs={"ContentType": "video/mp4"},
             )
             endpoint_host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
             final_b2_url = f"https://{endpoint_host}/{B2_BUCKET_NAME}/{object_name}"
