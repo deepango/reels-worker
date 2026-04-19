@@ -11,6 +11,7 @@ import psycopg2
 from botocore.client import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import urlparse
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -350,9 +351,16 @@ def download_file_with_auth(url, filepath):
                 aws_secret_access_key=B2_APPLICATION_KEY,
                 config=Config(signature_version="s3v4"),
             )
-            url_parts = url.split(B2_BUCKET_NAME + "/")
-            if len(url_parts) > 1:
-                b2.download_file(B2_BUCKET_NAME, url_parts[1], filepath)
+            parsed = urlparse(url)
+            # Virtual-hosted-style: https://<bucket>.s3.<region>.backblazeb2.com/<key>
+            if parsed.netloc.startswith(B2_BUCKET_NAME + "."):
+                object_key = parsed.path.lstrip("/")
+            else:
+                # Path-style: https://s3.<region>.backblazeb2.com/<bucket>/<key>
+                url_parts = url.split(B2_BUCKET_NAME + "/")
+                object_key = url_parts[1] if len(url_parts) > 1 else None
+            if object_key:
+                b2.download_file(B2_BUCKET_NAME, object_key, filepath)
                 return filepath
         except Exception as e:
             print(f"boto3 download failed, falling back to HTTP: {e}")
