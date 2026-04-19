@@ -158,7 +158,7 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
         "-loop", "1", "-i", img_path,
         "-i", audio_path,
         "-filter_complex",
-        f"[0:v]{vf}[v];[1:a]loudnorm=I=-16:LRA=7:TP=-2[a]",
+        f"[0:v]{vf}[v];[1:a]atrim=end={duration},loudnorm=I=-16:LRA=7:TP=-2[a]",
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "fast", "-crf", "22",
         "-c:a", "aac", "-b:a", "192k",
