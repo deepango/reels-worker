@@ -44,6 +44,12 @@ QUEUE_NAME = "reels:jobs"
 VIDEO_FPS = 25
 CROSSFADE_DURATION = 0.4  # seconds overlap between scenes
 
+# Fonts — installed via Dockerfile. Use ``fontfile`` in drawtext rather than
+# ``font`` + ``style`` because FFmpeg drawtext doesn't have a ``style`` option
+# and ``font`` relies on fontconfig lookup which is fragile inside containers.
+CAPTION_FONT   = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+WATERMARK_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
 try:
     r = redis.from_url(REDIS_URL)
     print(f"Connected to Redis at {REDIS_URL.split('@')[-1] if '@' in REDIS_URL else REDIS_URL}")
@@ -186,14 +192,14 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     # alpha fade-in over first 6 frames (0.24 s) softens the text appearance.
     if voiceover_text:
         caption = _esc(_wrap_text(voiceover_text, max_chars=22))
-        # line_spacing is only supported in FFmpeg ≥ 6.1; safe to include since
-        # the worker Dockerfile uses FFmpeg 7.1.
+        # ``fontfile`` is the reliable way to specify weight — FFmpeg drawtext
+        # has no ``style`` option; ``font`` alone relies on fontconfig and is
+        # fragile in containers. ``line_spacing`` requires FFmpeg ≥ 6.1 (we run 7.1).
         vf += (
             f",drawtext=text='{caption}'"
+            f":fontfile={CAPTION_FONT}"
             ":fontcolor=white"
             ":fontsize=62"
-            ":font=Arial"
-            ":style=bold"
             ":shadowcolor=black@0.75"
             ":shadowx=2:shadowy=2"
             ":borderw=0"
@@ -201,7 +207,7 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
             ":x=(w-text_w)/2"
             ":y=h-text_h-180"
             ":expansion=none"
-            # Fade text in over first 6 frames for a clean appearance
+            # Fade the caption in over the first 6 frames (0.24 s) for a clean entry.
             f":alpha='if(lt(n,6),n/6,1)'"
         )
 
@@ -326,14 +332,13 @@ def add_music_and_branding(video_path, output_path, topic="", music_path=None, b
 
     if has_brand:
         brand = _esc(brand_name)
-        # Watermark: uppercase, subtle white@0.6 with 1px shadow — legible but
-        # not distracting. Top-right at 40px margin matches Instagram story safe zone.
+        # Watermark: subtle white@0.6 with a 1px drop shadow — legible but
+        # unobtrusive. Top-right at 40px margin matches the Instagram story safe zone.
         filters.append(
             f"[{vid_idx}:v]drawtext=text='{brand}'"
+            f":fontfile={WATERMARK_FONT}"
             ":fontcolor=white@0.6"
             ":fontsize=34"
-            ":font=Arial"
-            ":style=bold"
             ":shadowcolor=black@0.5"
             ":shadowx=1:shadowy=1"
             ":borderw=0"

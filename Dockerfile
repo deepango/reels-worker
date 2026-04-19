@@ -7,11 +7,17 @@ USER root
 # Avoid timezone prompts during apt installations
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update apt and install Python 3 and pip
+# Update apt and install Python 3, pip, and editorial-quality fonts for FFmpeg drawtext.
+# fonts-dejavu-core     — DejaVu Sans (workhorse, ubiquitous)
+# fonts-liberation      — Liberation Sans (metric-compatible with Arial)
+# fonts-noto-core       — Noto family (good fallbacks, Unicode coverage)
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up a working directory
