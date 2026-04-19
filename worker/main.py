@@ -25,6 +25,15 @@ B2_APPLICATION_KEY_ID = os.environ.get("B2_APPLICATION_KEY_ID")
 B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
 B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME")
 
+def _b2_region():
+    """Extract region from B2 endpoint: s3.us-east-005.backblazeb2.com -> us-east-005"""
+    if not B2_ENDPOINT:
+        return "us-east-1"
+    host = B2_ENDPOINT.replace("https://", "").replace("http://", "").split("/")[0]
+    parts = host.split(".")
+    # format: s3.<region>.backblazeb2.com
+    return parts[1] if len(parts) >= 4 else "us-east-1"
+
 # Background music: set to B2 base URL, e.g. https://s3.us-west-000.backblazeb2.com/my-bucket/music
 # Expects ambient.mp3 / upbeat.mp3 / cinematic.mp3 uploaded to that prefix.
 BACKGROUND_MUSIC_BASE_URL = os.environ.get("BACKGROUND_MUSIC_BASE_URL")
@@ -352,6 +361,7 @@ def download_file_with_auth(url, filepath):
                 endpoint_url=endpoint_url,
                 aws_access_key_id=B2_APPLICATION_KEY_ID,
                 aws_secret_access_key=B2_APPLICATION_KEY,
+                region_name=_b2_region(),
                 config=Config(signature_version="s3v4"),
             )
             parsed = urlparse(url)
@@ -520,6 +530,7 @@ def process_job(job_data):
                 endpoint_url=endpoint_url,
                 aws_access_key_id=B2_APPLICATION_KEY_ID,
                 aws_secret_access_key=B2_APPLICATION_KEY,
+                region_name=_b2_region(),
                 config=Config(signature_version="s3v4"),
             )
             object_name = f"{job_id}/final.mp4"
