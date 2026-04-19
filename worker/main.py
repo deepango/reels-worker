@@ -75,8 +75,13 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # Text helpers for captions and watermarks
 # ---------------------------------------------------------------------------
 
-def _wrap_text(text: str, max_chars: int = 22) -> str:
-    """Hard-wrap at word boundaries. Tighter wrap (22 chars) for large font on 1080px."""
+def _wrap_text(text: str, max_chars: int = 18) -> list:
+    """Hard-wrap at word boundaries. Returns a LIST of lines — do NOT join here.
+
+    Joining is done after _esc() so the \\n separator is never mangled by
+    the backslash-doubling in _esc(). max_chars=18 keeps text inside 1080px
+    at fontsize=58 even with wide capital letters (~45px each: 18×45=810px).
+    """
     words = text.split()
     lines, line = [], []
     for w in words:
@@ -86,19 +91,21 @@ def _wrap_text(text: str, max_chars: int = 22) -> str:
         line.append(w)
     if line:
         lines.append(" ".join(line))
-    return r"\n".join(lines)
+    return lines
 
 
 def _esc(s: str) -> str:
-    """Escape for FFmpeg drawtext filter_complex values.
+    """Escape a single line for FFmpeg drawtext.
 
-    Escaping layers (inner → outer):
-      1. Backslash must be doubled first (FFmpeg filter string level).
-      2. Colon is the option separator — escape as \\:.
-      3. Single quotes inside text='...' cannot be escaped as \\' within the
-         quoted value — replace with U+2019 (right single quotation mark,
-         visually identical). This prevents the parser from closing the
-         text= value early and corrupting the filter chain.
+    Only called on plain text lines — no backslashes present — so the
+    backslash-double step is kept for safety but won't mangle \\n separators
+    (which are added AFTER _esc by the caller).
+
+    Escaping rules:
+      • Backslash doubled (filter string level).
+      • Colon escaped as \\: (option separator).
+      • Single quote replaced with U+2019 (right single quotation mark) —
+        cannot be escaped inside a quoted text='...' value in filter_complex.
     """
     return (
         s.replace("\\", "\\\\")
@@ -191,23 +198,21 @@ def make_scene_video(img_path, audio_path, output_path, voiceover_text=None):
     # read on white backgrounds without looking like a black halo.
     # alpha fade-in over first 6 frames (0.24 s) softens the text appearance.
     if voiceover_text:
-        caption = _esc(_wrap_text(voiceover_text, max_chars=22))
-        # ``fontfile`` is the reliable way to specify weight — FFmpeg drawtext
-        # has no ``style`` option; ``font`` alone relies on fontconfig and is
-        # fragile in containers. ``line_spacing`` requires FFmpeg ≥ 6.1 (we run 7.1).
+        # _wrap_text returns a list; _esc each line THEN join with \n so the
+        # backslash-doubling in _esc never mangles the newline separator.
+        caption = r"\n".join(_esc(ln) for ln in _wrap_text(voiceover_text))
         vf += (
             f",drawtext=text='{caption}'"
             f":fontfile={CAPTION_FONT}"
             ":fontcolor=white"
-            ":fontsize=62"
+            ":fontsize=58"
             ":shadowcolor=black@0.75"
             ":shadowx=2:shadowy=2"
             ":borderw=0"
-            ":line_spacing=8"
+            ":line_spacing=10"
             ":x=(w-text_w)/2"
-            ":y=h-text_h-180"
+            ":y=h-text_h-160"
             ":expansion=none"
-            # Fade the caption in over the first 6 frames (0.24 s) for a clean entry.
             f":alpha='if(lt(n,6),n/6,1)'"
         )
 
