@@ -84,8 +84,11 @@ def _wrap_text(text: str, max_chars: int = 28) -> str:
 
 
 def _esc(s: str) -> str:
-    """Escape characters special to FFmpeg drawtext."""
-    return s.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    """Escape characters special to FFmpeg drawtext.
+    Single quotes break FFmpeg's filter_complex parser when inside a quoted text= value,
+    so replace with the visually identical Unicode right-single-quotation-mark (U+2019).
+    """
+    return s.replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:")
 
 
 # ---------------------------------------------------------------------------
