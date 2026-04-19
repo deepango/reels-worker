@@ -186,6 +186,8 @@ def concat_with_crossfade(scene_videos, output_path):
         return
 
     durations = [get_duration(v) for v in scene_videos]
+    # Crossfade must be shorter than every scene; cap at 20% of the shortest scene.
+    xfade = min(CROSSFADE_DURATION, min(durations) * 0.2)
     inputs = []
     for v in scene_videos:
         inputs += ["-i", v]
@@ -196,20 +198,20 @@ def concat_with_crossfade(scene_videos, output_path):
 
     # Build chained xfade (video) and acrossfade (audio) filters.
     for i in range(n - 1):
-        cumulative_offset += durations[i] - CROSSFADE_DURATION
+        cumulative_offset += durations[i] - xfade
         v_in_a = "[0:v]" if i == 0 else f"[xv{i - 1}]"
         v_in_b = f"[{i + 1}:v]"
         v_out = "[xvout]" if i == n - 2 else f"[xv{i}]"
         vfilters.append(
             f"{v_in_a}{v_in_b}xfade=transition=fade:"
-            f"duration={CROSSFADE_DURATION:.2f}:offset={cumulative_offset:.3f}{v_out}"
+            f"duration={xfade:.3f}:offset={cumulative_offset:.3f}{v_out}"
         )
 
         a_in_a = "[0:a]" if i == 0 else f"[xa{i - 1}]"
         a_in_b = f"[{i + 1}:a]"
         a_out = "[xaout]" if i == n - 2 else f"[xa{i}]"
         afilters.append(
-            f"{a_in_a}{a_in_b}acrossfade=d={CROSSFADE_DURATION:.2f}{a_out}"
+            f"{a_in_a}{a_in_b}acrossfade=d={xfade:.3f}{a_out}"
         )
 
     filter_complex = ";".join(vfilters + afilters)
