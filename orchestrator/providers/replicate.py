@@ -19,8 +19,14 @@ def generate_image(prompt: str) -> str:
             "aspect_ratio": "9:16",
             "output_format": "jpg",
             "output_quality": 95,
-            "go_fast": True,
+            # flux-dev: full 50-step diffusion model. 35 steps is the sweet spot —
+            # default 28 is too fast for marble/brass material detail, 50 is overkill.
+            "num_inference_steps": 35,
+            # guidance (CFG scale): 3.5 is flux-dev's default and works well for
+            # architectural prompts. Lower = more creative, higher = stricter adherence.
+            "guidance": 3.5,
             "num_outputs": 1,
+            # Note: flux-dev does NOT support go_fast or disable_safety_checker
         }
     }
     try:

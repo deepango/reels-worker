@@ -16,7 +16,7 @@ ORCHESTRATOR_CALLBACK_URL = os.environ.get("ORCHESTRATOR_CALLBACK_URL")  # worke
 QUEUE_NAME = "reels:jobs"
 VOICE_ID = "p405EPtuTbD6LL5ZPhG3"
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-REPLICATE_MODEL_URL = "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions"
+REPLICATE_MODEL_URL = "https://api.replicate.com/v1/models/black-forest-labs/flux-dev/predictions"
 REPLICATE_POLL_INTERVAL = 3   # seconds
-REPLICATE_MAX_POLLS = 40
+REPLICATE_MAX_POLLS = 60      # flux-dev takes 15-25s vs schnell's 2-3s; 60 × 3s = 3 min max
 SCENE_RATE_LIMIT_WAIT = 11    # seconds between scenes (matches n8n)
